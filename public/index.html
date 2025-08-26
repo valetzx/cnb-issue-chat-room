@@ -491,12 +491,25 @@
         }
 
         // 房间管理
-        function loadRooms() {
+        async function loadRooms() {
             try {
                 const stored = localStorage.getItem('cnbChatRooms');
                 state.rooms = stored ? JSON.parse(stored) : [];
             } catch {
                 state.rooms = [];
+            }
+
+            // 如果本地没有房间，尝试从后端获取一次
+            if (state.rooms.length === 0) {
+                try {
+                    const res = await fetch('/api/rooms');
+                    if (res.ok) {
+                        state.rooms = await res.json();
+                        saveRooms();
+                    }
+                } catch (error) {
+                    console.error('获取聊天室列表失败:', error);
+                }
             }
 
             renderRoomsList();
