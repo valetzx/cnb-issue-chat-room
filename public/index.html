@@ -396,7 +396,7 @@
             }
             
             // 加载房间
-            fetchRooms();
+            loadRooms();
             
             // 设置事件监听
             setupEventListeners();
@@ -491,26 +491,34 @@
         }
 
         // 房间管理
-        function fetchRooms() {
-            fetch('/api/rooms')
-                .then(res => {
-                    if (!res.ok) throw new Error('获取房间列表失败');
-                    return res.json();
-                })
-                .then(rooms => {
-                    state.rooms = rooms;
-                    renderRoomsList();
-                    
-                    // 首次加载且有房间时，自动选择第一个房间
-                    if (state.isFirstLoad && rooms.length > 0) {
-                        state.isFirstLoad = false;
-                        selectRoom(rooms[0]);
+        async function loadRooms() {
+            try {
+                const stored = localStorage.getItem('cnbChatRooms');
+                state.rooms = stored ? JSON.parse(stored) : [];
+            } catch {
+                state.rooms = [];
+            }
+
+            // 如果本地没有房间，尝试从后端获取一次
+            if (state.rooms.length === 0) {
+                try {
+                    const res = await fetch('/api/rooms');
+                    if (res.ok) {
+                        state.rooms = await res.json();
+                        saveRooms();
                     }
-                })
-                .catch(err => {
-                    showNotification('获取房间列表失败', 'error');
-                    console.error('Error fetching rooms:', err);
-                });
+                } catch (error) {
+                    console.error('获取聊天室列表失败:', error);
+                }
+            }
+
+            renderRoomsList();
+
+            // 首次加载且有房间时，自动选择第一个房间
+            if (state.isFirstLoad && state.rooms.length > 0) {
+                state.isFirstLoad = false;
+                selectRoom(state.rooms[0]);
+            }
         }
 
         function renderRoomsList() {
@@ -550,24 +558,29 @@
             if (confirm('确定要从本地存储中删除此聊天室吗？')) {
                 // 从状态中移除房间
                 state.rooms = state.rooms.filter(room => room.id !== roomId);
-                
-                // 重新渲染房间列表
+
+                // 更新本地存储并重新渲染房间列表
+                saveRooms();
                 renderRoomsList();
-                
+
                 // 如果删除的是当前选中的房间，隐藏聊天区域并恢复默认标题
                 if (state.currentRoom && state.currentRoom.id === roomId) {
                     state.currentRoom = null;
                     elements.chatContainer.classList.add('hidden');
                     elements.initialMessage.classList.remove('hidden');
-                    
+
                     // 恢复默认标题
                     elements.defaultHeader.classList.remove('hidden');
                     elements.roomHeader.classList.add('hidden');
                     elements.roomActions.classList.add('hidden');
                 }
-                
+
                 showNotification('聊天室已从本地存储中删除', 'success');
             }
+        }
+
+        function saveRooms() {
+            localStorage.setItem('cnbChatRooms', JSON.stringify(state.rooms));
         }
 
         // 解析CNB Issue链接
@@ -622,46 +635,35 @@
         function createRoom() {
             const name = elements.roomNameInput.value.trim();
             const url = elements.roomUrlInput.value.trim();
-            
+
             if (!name || !url) {
                 showNotification('请填写聊天室名称和链接', 'error');
                 return;
             }
-            
+
             // 解析URL
             const parsed = parseCNBUrl(url);
             if (!parsed) {
                 showNotification('无效的CNB Issue链接，请检查格式', 'error');
                 return;
             }
-            
+
             const { repo, issueID } = parsed;
-            
-            fetch('/api/rooms', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ 
-                    name,
-                    url,
-                    repo,
-                    issueID
-                })
-            })
-            .then(res => {
-                if (!res.ok) throw new Error('创建房间失败');
-                return res.json();
-            })
-            .then(newRoom => {
-                closeAddRoomModal();
-                fetchRooms();
-                showNotification('聊天室创建成功', 'success');
-            })
-            .catch(err => {
-                showNotification(err.message, 'error');
-                console.error('Error creating room:', err);
-            });
+
+            const newRoom = {
+                id: Date.now(),
+                name,
+                url,
+                repo,
+                issueID
+            };
+
+            state.rooms.push(newRoom);
+            saveRooms();
+            renderRoomsList();
+            closeAddRoomModal();
+            showNotification('聊天室创建成功', 'success');
+            selectRoom(newRoom);
         }
 
         function selectRoom(room) {
