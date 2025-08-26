@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CNB 聊天室</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://jsd.onmicrosoft.cn/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <!-- 引入marked库用于Markdown解析 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
+    <!-- Tailwind 配置 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3B82F6',
+                        secondary: '#10B981',
+                        accent: '#FE5B35', // 橙色进度条
+                        dark: {
+                            100: '#374151',
+                            200: '#1F2937',
+                            300: '#111827',
+                            400: '#030712'
+                        },
+                        light: {
+                            100: '#FFFFFF',
+                            200: '#F9FAFB',
+                            300: '#F3F4F6',
+                            400: '#E5E7EB'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .message-appear {
+                animation: fadeIn 0.3s ease-in-out;
+            }
+            /* 隐藏所有滚动条 */
+            .no-scrollbar {
+                -ms-overflow-style: none;  /* IE and Edge */
+                scrollbar-width: none;  /* Firefox */
+            }
+            .no-scrollbar::-webkit-scrollbar {
+                display: none; /* Chrome, Safari and Opera */
+            }
+            /* Markdown样式补充 */
+            .message-appear h1 { @apply text-2xl font-bold my-3; }
+            .message-appear h2 { @apply text-xl font-bold my-2; }
+            .message-appear h3 { @apply text-lg font-bold my-2; }
+            .message-appear p { @apply my-2; }
+            .message-appear ul { @apply list-disc pl-5 my-2; }
+            .message-appear ol { @apply list-decimal pl-5 my-2; }
+            .message-appear blockquote { @apply border-l-4 border-primary pl-3 italic my-2; }
+            .message-appear code { @apply bg-light-300 dark:bg-dark-100 px-1 rounded text-sm; }
+            .message-appear pre { @apply bg-light-300 dark:bg-dark-100 p-3 rounded my-2 overflow-x-auto; }
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 全局样式 */
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+        
+        /* 页码输入框样式 */
+        .page-input {
+            width: 40px;
+            text-align: center;
+        }
+        
+        /* 每页数量输入框样式 */
+        .page-size-input {
+            width: 50px;
+            text-align: center;
+        }
+
+        /* 加载上一页按钮样式 */
+        #load-prev-page-btn {
+            position: absolute;
+            left: 1rem;
+            top: 1rem;
+            z-index: 10;
+            transition: all 0.3s ease;
+            overflow: hidden;
+        }
+        
+        /* 进度条容器 */
+        #load-prev-progress {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 3px;
+            background-color: #FE5B35;
+            width: 0%;
+            transition: width 0.1s ease;
+        }
+        
+        /* 按钮文本容器 - 确保文字在进度条上方 */
+        #load-prev-content {
+            position: relative;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            space-x: 1;
+        }
+    </style>
+</head>
+<body class="bg-light-300 dark:bg-dark-300 text-gray-800 dark:text-gray-200 h-screen flex flex-col transition-colors duration-300">
+    <!-- 顶部导航栏 -->
+    <header class="bg-light-100 dark:bg-dark-200 shadow-md z-10 transition-colors duration-300 flex-shrink-0">
+        <div class="container mx-auto px-4 py-3 flex justify-between items-center">
+            <!-- 默认标题和聊天室信息容器 -->
+            <div id="header-content" class="flex items-center space-x-4">
+                <!-- 默认标题 -->
+                <div id="default-header" class="flex items-center space-x-2">
+                    <i class="fa fa-comments text-primary text-2xl"></i>
+                    <h1 class="text-xl font-bold">CNB 聊天室</h1>
+                </div>
+                
+                <!-- 聊天室信息 (初始隐藏) -->
+                <div id="room-header" class="hidden flex items-center space-x-2">
+                    <i class="fa fa-comments text-primary text-2xl"></i>
+                    <div>
+                        <h2 id="current-room-name-header" class="font-bold text-lg"></h2>
+                        <div id="current-room-url-header" class="text-xs text-gray-500 dark:text-gray-400 truncate mt-1 max-w-xs"></div>
+                    </div>
+                </div>
+                
+                <!-- 刷新按钮和连接状态 (初始隐藏) -->
+                <div id="room-actions" class="hidden flex items-center space-x-2">
+                    <button id="refresh-messages" class="p-2 text-gray-600 dark:text-gray-400 hover:bg-light-300 dark:hover:bg-dark-100 rounded-full transition-colors duration-300">
+                        <i class="fa fa-refresh"></i>
+                    </button>
+                    <span id="connection-status" class="text-xs px-2 py-1 rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 hidden">
+                        <i class="fa fa-check-circle"></i> 已连接
+                    </span>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-4">
+                <div id="auth-token-container" class="hidden md:flex items-center space-x-2">
+                    <input type="password" id="auth-token" placeholder="Auth Token" 
+                        class="bg-light-300 dark:bg-dark-100 px-3 py-1 rounded text-sm w-48 focus:outline-none focus:ring-2 focus:ring-primary transition-colors duration-300">
+                    <button id="save-token" class="bg-primary hover:bg-primary/90 text-white px-3 py-1 rounded text-sm transition">
+                        保存
+                    </button>
+                </div>
+                
+                <button id="theme-toggle" class="p-2 rounded-full hover:bg-light-300 dark:hover:bg-dark-100 transition-colors duration-300">
+                    <i class="fa fa-moon-o dark:hidden"></i>
+                    <i class="fa fa-sun-o hidden dark:block"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主内容区 - 使用flex布局填充剩余空间 -->
+    <main class="flex-1 flex overflow-hidden">
+        <!-- 房间列表 -->
+        <aside class="w-full md:w-64 bg-light-100 dark:bg-dark-200 shadow-lg flex flex-col transition-colors duration-300 flex-shrink-0">
+            <div class="p-4 border-b dark:border-dark-100 flex-shrink-0">
+                <div class="flex items-center justify-between">
+                    <h2 class="font-bold text-lg">聊天室</h2>
+                    <button id="add-room-btn" class="p-2 text-primary hover:bg-light-300 dark:hover:bg-dark-100 rounded-full transition-colors duration-300">
+                        <i class="fa fa-plus"></i>
+                    </button>
+                </div>
+                
+                <!-- 移动端Token输入 -->
+                <div class="mt-3 md:hidden">
+                    <div class="flex items-center space-x-2">
+                        <input type="password" id="auth-token-mobile" placeholder="Auth Token" 
+                            class="bg-light-300 dark:bg-dark-100 px-3 py-1 rounded text-sm flex-1 focus:outline-none focus:ring-2 focus:ring-primary transition-colors duration-300">
+                        <button id="save-token-mobile" class="bg-primary hover:bg-primary/90 text-white px-3 py-1 rounded text-sm transition">
+                            保存
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto no-scrollbar p-2" id="rooms-list">
+                <!-- 房间列表将通过JS动态生成 -->
+            </div>
+        </aside>
+
+        <!-- 聊天区域 - 使用flex布局 -->
+        <section id="chat-container" class="flex-1 flex flex-col bg-light-200 dark:bg-dark-300 hidden transition-colors duration-300 relative">
+            <!-- 加载上一页按钮 (带进度条) -->
+            <button id="load-prev-page-btn" class="hidden bg-primary/90 hover:bg-primary text-white px-3 py-1 rounded-lg shadow-lg" title="加载上一页历史消息">
+                <div id="load-prev-progress"></div> <!-- 橙色进度条 -->
+                <div id="load-prev-content">
+                    <i class="fa fa-chevron-up"></i>
+                    <span>加载上一页</span>
+                </div>
+            </button>
+            
+            <!-- 消息区域 - 使用flex布局填充剩余空间 -->
+            <div id="messages-container" class="flex-1 overflow-y-auto p-4 space-y-4 no-scrollbar pt-12">
+                <!-- 消息将通过JS动态生成 -->
+                <div id="initial-message" class="flex items-center justify-center h-full text-gray-500 dark:text-gray-400">
+                    选择一个聊天室开始聊天
+                </div>
+            </div>
+            
+            <!-- 输入区域 - 固定在底部 -->
+            <div class="bg-light-100 dark:bg-dark-200 p-4 border-t dark:border-dark-100 transition-colors duration-300 flex-shrink-0">
+                <div class="flex flex-col space-y-2">
+                    <textarea id="message-input" rows="3" placeholder="输入消息...（支持Markdown格式）" 
+                        class="w-full bg-light-300 dark:bg-dark-100 p-3 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary resize-none transition-colors duration-300"></textarea>
+                    
+                    <div class="flex justify-between items-center">
+                        <div class="flex items-center space-x-4 text-sm text-gray-500 dark:text-gray-400">
+                            <div>
+                                <span id="char-count">0</span> 字符
+                            </div>
+                            
+                            <!-- 翻页控制和每页数量输入 -->
+                            <div class="flex items-center space-x-2">
+                                <!-- 每页数量控制 -->
+                                <div class="flex items-center space-x-1">
+                                    <span>每页:</span>
+                                    <input type="number" id="page-size-input" min="1" max="200" 
+                                        class="page-size-input bg-light-300 dark:bg-dark-100 px-2 py-1 rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                                        value="10">
+                                    <span>条</span>
+                                </div>
+                                
+                                <!-- 页码控制 -->
+                                <div class="flex items-center space-x-1">
+                                    <button id="prev-page" class="p-1 rounded hover:bg-light-300 dark:hover:bg-dark-100 disabled:opacity-50 disabled:cursor-not-allowed">
+                                        <i class="fa fa-chevron-left text-xs"></i>
+                                    </button>
+                                    <span>第</span>
+                                    <input type="number" id="page-input" min="1" 
+                                        class="page-input bg-light-300 dark:bg-dark-100 px-2 py-1 rounded text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                                        value="1">
+                                    <span>页</span>
+                                    <button id="next-page" class="p-1 rounded hover:bg-light-300 dark:hover:bg-dark-100">
+                                        <i class="fa fa-chevron-right text-xs"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button id="send-message" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-lg transition flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                            <i class="fa fa-paper-plane"></i>
+                            <span>发送</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- 新建房间模态框 -->
+    <div id="add-room-modal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+        <div class="bg-light-100 dark:bg-dark-200 rounded-lg shadow-xl w-full max-w-md p-6 transform transition-all duration-300">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">新建聊天室</h3>
+                <button id="close-modal" class="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label for="room-name" class="block text-sm font-medium mb-1">聊天室名称</label>
+                    <input type="text" id="room-name" placeholder="输入聊天室名称" 
+                        class="w-full bg-light-300 dark:bg-dark-100 p-2 rounded border border-light-400 dark:border-dark-100 focus:outline-none focus:ring-2 focus:ring-primary transition-colors duration-300">
+                </div>
+                
+                <div>
+                    <label for="room-url" class="block text-sm font-medium mb-1">Issue链接</label>
+                    <input type="text" id="room-url" placeholder="例如: https://cnb.cool/set/Playground/Desktop/-/issues/4" 
+                        class="w-full bg-light-300 dark:bg-dark-100 p-2 rounded border border-light-400 dark:border-dark-100 focus:outline-none focus:ring-2 focus:ring-primary transition-colors duration-300">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">请输入完整的CNB issue链接</p>
+                </div>
+                
+                <button id="create-room" class="w-full bg-primary hover:bg-primary/90 text-white py-2 rounded-lg transition">
+                    创建聊天室
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载中指示器 -->
+    <div id="loading-indicator" class="fixed inset-0 bg-black/30 flex items-center justify-center z-50 hidden">
+        <div class="bg-light-100 dark:bg-dark-200 p-4 rounded-lg shadow-lg flex items-center space-x-2 transition-colors duration-300">
+            <i class="fa fa-circle-o-notch fa-spin text-primary text-xl"></i>
+            <span>加载中...</span>
+        </div>
+    </div>
+
+    <!-- 通知组件 -->
+    <div id="notification" class="fixed bottom-4 right-4 p-4 rounded-lg shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 max-w-sm hidden"></div>
+
+    <script>
+        // DOM 元素
+        const elements = {
+            // 加载上一页按钮及进度条
+            loadPrevPageBtn: document.getElementById('load-prev-page-btn'),
+            loadPrevProgress: document.getElementById('load-prev-progress'),
+            loadPrevContent: document.getElementById('load-prev-content'),
+            
+            // 房间相关
+            roomsList: document.getElementById('rooms-list'),
+            addRoomBtn: document.getElementById('add-room-btn'),
+            addRoomModal: document.getElementById('add-room-modal'),
+            closeModal: document.getElementById('close-modal'),
+            roomNameInput: document.getElementById('room-name'),
+            roomUrlInput: document.getElementById('room-url'),
+            createRoomBtn: document.getElementById('create-room'),
+            currentRoomName: document.getElementById('current-room-name-header'),
+            currentRoomUrl: document.getElementById('current-room-url-header'),
+            chatContainer: document.getElementById('chat-container'),
+            initialMessage: document.getElementById('initial-message'),
+            
+            // 顶部导航栏元素
+            defaultHeader: document.getElementById('default-header'),
+            roomHeader: document.getElementById('room-header'),
+            roomActions: document.getElementById('room-actions'),
+            refreshMessagesBtn: document.getElementById('refresh-messages'),
+            connectionStatus: document.getElementById('connection-status'),
+            
+            // 消息相关
+            messagesContainer: document.getElementById('messages-container'),
+            messageInput: document.getElementById('message-input'),
+            sendMessageBtn: document.getElementById('send-message'),
+            charCount: document.getElementById('char-count'),
+            
+            // 翻页控制元素
+            prevPageBtn: document.getElementById('prev-page'),
+            nextPageBtn: document.getElementById('next-page'),
+            pageInput: document.getElementById('page-input'),
+            pageSizeInput: document.getElementById('page-size-input'),
+            
+            // 认证相关
+            authTokenInput: document.getElementById('auth-token'),
+            authTokenMobileInput: document.getElementById('auth-token-mobile'),
+            saveTokenBtn: document.getElementById('save-token'),
+            saveTokenMobileBtn: document.getElementById('save-token-mobile'),
+            
+            // 其他
+            themeToggle: document.getElementById('theme-toggle'),
+            loadingIndicator: document.getElementById('loading-indicator'),
+            notification: document.getElementById('notification')
+        };
+
+        // 状态管理
+        const state = {
+            rooms: [],
+            currentRoom: null,
+            authToken: localStorage.getItem('cnbAuthToken') || '',
+            currentPage: 1,  // 页码从1开始，默认1
+            pageSize: 10, // 每页数量，默认10
+            isLoading: false,
+            isFirstLoad: true,
+            showLoadPrevBtn: false, // 控制是否显示加载上一页按钮
+            scrollProgress: 0, // 滚动进度百分比
+            scrollTimeout: null, // 用于跟踪滚动超时
+            requiredProgress: 100, // 需要达到的进度百分比才会自动加载
+            lastScrollTop: 0 // 上一次滚动位置
+        };
+
+        // 初始化
+        function init() {
+            // 从本地存储加载分页设置
+            loadPaginationSettings();
+            
+            // 加载保存的Token
+            if (state.authToken) {
+                elements.authTokenInput.value = state.authToken;
+                elements.authTokenMobileInput.value = state.authToken;
+            }
+            
+            // 检查主题偏好
+            if (localStorage.getItem('darkMode') === 'true' || 
+                (!localStorage.getItem('darkMode') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+            }
+            
+            // 加载房间
+            fetchRooms();
+            
+            // 设置事件监听
+            setupEventListeners();
+            
+            // 初始化输入框显示
+            updatePaginationInputs();
+        }
+
+        // 从本地存储加载分页设置
+        function loadPaginationSettings() {
+            const savedPage = localStorage.getItem('cnbChatPage');
+            const savedPageSize = localStorage.getItem('cnbChatPageSize');
+            
+            if (savedPage) {
+                state.currentPage = parseInt(savedPage) || 1;
+            }
+            
+            if (savedPageSize) {
+                state.pageSize = parseInt(savedPageSize) || 10;
+            }
+        }
+
+        // 保存分页设置到本地存储
+        function savePaginationSettings() {
+            localStorage.setItem('cnbChatPage', state.currentPage.toString());
+            localStorage.setItem('cnbChatPageSize', state.pageSize.toString());
+        }
+
+        // 更新分页输入框显示
+        function updatePaginationInputs() {
+            elements.pageInput.value = state.currentPage;
+            elements.pageSizeInput.value = state.pageSize;
+            updatePageButtonsState();
+        }
+
+        // 设置事件监听
+        function setupEventListeners() {
+            // 加载上一页按钮点击事件
+            elements.loadPrevPageBtn.addEventListener('click', confirmLoadPreviousPage);
+            
+            // 房间相关
+            elements.addRoomBtn.addEventListener('click', openAddRoomModal);
+            elements.closeModal.addEventListener('click', closeAddRoomModal);
+            elements.createRoomBtn.addEventListener('click', createRoom);
+            elements.refreshMessagesBtn.addEventListener('click', refreshMessages);
+            
+            // 消息相关
+            elements.messageInput.addEventListener('input', updateCharCount);
+            elements.sendMessageBtn.addEventListener('click', sendMessage);
+            elements.messageInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    sendMessage();
+                }
+            });
+            
+            // 翻页控制事件
+            elements.prevPageBtn.addEventListener('click', goToPrevPage);
+            elements.nextPageBtn.addEventListener('click', goToNextPage);
+            
+            // 支持回车键提交页码和每页数量
+            elements.pageInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    goToSpecifiedPage();
+                }
+            });
+            
+            elements.pageSizeInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    applyPageSize();
+                }
+            });
+            
+            // 认证相关
+            elements.saveTokenBtn.addEventListener('click', saveAuthToken);
+            elements.saveTokenMobileBtn.addEventListener('click', saveAuthToken);
+            
+            // 主题切换
+            elements.themeToggle.addEventListener('click', toggleTheme);
+            
+            // 点击外部关闭模态框
+            elements.addRoomModal.addEventListener('click', (e) => {
+                if (e.target === elements.addRoomModal) {
+                    closeAddRoomModal();
+                }
+            });
+            
+            // 滚动加载更多
+            elements.messagesContainer.addEventListener('scroll', handleScroll);
+        }
+
+        // 房间管理
+        function fetchRooms() {
+            fetch('/api/rooms')
+                .then(res => {
+                    if (!res.ok) throw new Error('获取房间列表失败');
+                    return res.json();
+                })
+                .then(rooms => {
+                    state.rooms = rooms;
+                    renderRoomsList();
+                    
+                    // 首次加载且有房间时，自动选择第一个房间
+                    if (state.isFirstLoad && rooms.length > 0) {
+                        state.isFirstLoad = false;
+                        selectRoom(rooms[0]);
+                    }
+                })
+                .catch(err => {
+                    showNotification('获取房间列表失败', 'error');
+                    console.error('Error fetching rooms:', err);
+                });
+        }
+
+        function renderRoomsList() {
+            elements.roomsList.innerHTML = '';
+            
+            state.rooms.forEach(room => {
+                const roomElement = document.createElement('div');
+                roomElement.className = `p-3 rounded-lg cursor-pointer transition-all duration-200 flex items-center justify-between ${
+                    state.currentRoom?.id === room.id ? 'bg-primary/10 text-primary' : 'hover:bg-light-300 dark:hover:bg-dark-100'
+                }`;
+                
+                roomElement.innerHTML = `
+                    <div class="flex items-center space-x-2">
+                        <i class="fa fa-comments-o"></i>
+                        <span class="truncate">${room.name}</span>
+                    </div>
+                    <button class="delete-room-btn p-1 text-gray-400 hover:text-red-500 transition-colors" data-room-id="${room.id}">
+                        <i class="fa fa-times"></i>
+                    </button>
+                `;
+                
+                roomElement.addEventListener('click', () => selectRoom(room));
+                
+                // 添加删除按钮事件监听
+                const deleteBtn = roomElement.querySelector('.delete-room-btn');
+                deleteBtn.addEventListener('click', (e) => {
+                    e.stopPropagation(); // 阻止事件冒泡，避免触发房间选择
+                    deleteRoom(room.id);
+                });
+                
+                elements.roomsList.appendChild(roomElement);
+            });
+        }
+
+        // 删除房间（仅本地存储）
+        function deleteRoom(roomId) {
+            if (confirm('确定要从本地存储中删除此聊天室吗？')) {
+                // 从状态中移除房间
+                state.rooms = state.rooms.filter(room => room.id !== roomId);
+                
+                // 重新渲染房间列表
+                renderRoomsList();
+                
+                // 如果删除的是当前选中的房间，隐藏聊天区域并恢复默认标题
+                if (state.currentRoom && state.currentRoom.id === roomId) {
+                    state.currentRoom = null;
+                    elements.chatContainer.classList.add('hidden');
+                    elements.initialMessage.classList.remove('hidden');
+                    
+                    // 恢复默认标题
+                    elements.defaultHeader.classList.remove('hidden');
+                    elements.roomHeader.classList.add('hidden');
+                    elements.roomActions.classList.add('hidden');
+                }
+                
+                showNotification('聊天室已从本地存储中删除', 'success');
+            }
+        }
+
+        // 解析CNB Issue链接
+        function parseCNBUrl(url) {
+            try {
+                // 处理不带协议的URL
+                let normalizedUrl = url.startsWith('http') ? url : `https://${url}`;
+                const parsedUrl = new URL(normalizedUrl);
+                
+                // 验证域名
+                if (!parsedUrl.hostname.includes('cnb.cool')) {
+                    return null;
+                }
+                
+                // 分割路径并过滤空值
+                const pathSegments = parsedUrl.pathname.split('/').filter(segment => segment);
+                
+                // 寻找issues位置
+                const issuesIndex = pathSegments.indexOf('issues');
+                
+                if (issuesIndex <= 0) {
+                    return null; // 确保issues前有内容
+                }
+                
+                // 提取issueID和repo路径
+                const issueID = pathSegments[issuesIndex + 1];
+                const repoSegments = pathSegments.slice(0, issuesIndex - 1); // 排除-/
+                const repo = repoSegments.join('/');
+                
+                if (!issueID || !repo) {
+                    return null;
+                }
+                
+                return { repo, issueID };
+            } catch (error) {
+                console.error('解析URL失败:', error);
+                return null;
+            }
+        }
+
+        function openAddRoomModal() {
+            elements.addRoomModal.classList.remove('hidden');
+            elements.roomNameInput.focus();
+        }
+
+        function closeAddRoomModal() {
+            elements.addRoomModal.classList.add('hidden');
+            elements.roomNameInput.value = '';
+            elements.roomUrlInput.value = '';
+        }
+
+        function createRoom() {
+            const name = elements.roomNameInput.value.trim();
+            const url = elements.roomUrlInput.value.trim();
+            
+            if (!name || !url) {
+                showNotification('请填写聊天室名称和链接', 'error');
+                return;
+            }
+            
+            // 解析URL
+            const parsed = parseCNBUrl(url);
+            if (!parsed) {
+                showNotification('无效的CNB Issue链接，请检查格式', 'error');
+                return;
+            }
+            
+            const { repo, issueID } = parsed;
+            
+            fetch('/api/rooms', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    name,
+                    url,
+                    repo,
+                    issueID
+                })
+            })
+            .then(res => {
+                if (!res.ok) throw new Error('创建房间失败');
+                return res.json();
+            })
+            .then(newRoom => {
+                closeAddRoomModal();
+                fetchRooms();
+                showNotification('聊天室创建成功', 'success');
+            })
+            .catch(err => {
+                showNotification(err.message, 'error');
+                console.error('Error creating room:', err);
+            });
+        }
+
+        function selectRoom(room) {
+            state.currentRoom = room;
+            
+            // 更新顶部导航栏显示
+            elements.currentRoomName.textContent = room.name;
+            elements.currentRoomUrl.textContent = room.url;
+            
+            // 切换显示内容
+            elements.defaultHeader.classList.add('hidden');
+            elements.roomHeader.classList.remove('hidden');
+            elements.roomActions.classList.remove('hidden');
+            
+            elements.chatContainer.classList.remove('hidden');
+            elements.initialMessage.classList.remove('hidden');
+            
+            // 重新渲染房间列表以更新选中状态
+            renderRoomsList();
+            
+            // 更新输入框显示
+            updatePaginationInputs();
+            
+            // 加载消息
+            fetchMessages(true);
+        }
+
+        // 消息管理
+        function fetchMessages(clearExisting = false) {
+            if (!state.currentRoom || !state.authToken) return;
+            
+            const { repo, issueID } = state.currentRoom;
+            if (!repo || !issueID) {
+                showNotification('聊天室配置不完整', 'error');
+                return;
+            }
+            
+            showLoading(true);
+            
+            // 明确传递page和page_size参数
+            fetch(`/api/messages?repo=${encodeURIComponent(repo)}&issueID=${issueID}&page=${state.currentPage}&page_size=${state.pageSize}&token=${encodeURIComponent(state.authToken)}`)
+                .then(res => {
+                    if (!res.ok) {
+                        return res.json().then(data => {
+                            throw new Error(data.details || '获取消息失败');
+                        });
+                    }
+                    return res.json();
+                })
+                .then(messages => {
+                    showLoading(false);
+                    elements.connectionStatus.classList.remove('hidden');
+                    
+                    if (clearExisting) {
+                        elements.messagesContainer.innerHTML = '';
+                    }
+                    
+                    if (messages.length === 0 && state.currentPage === 1) {
+                        elements.messagesContainer.innerHTML = `
+                            <div class="text-center text-gray-500 dark:text-gray-400 py-8">
+                                该聊天室暂无消息
+                            </div>
+                        `;
+                        return;
+                    }
+                    
+                    // 如果请求的页面没有消息且不是第一页，显示提示
+                    if (messages.length === 0 && state.currentPage > 1) {
+                        showNotification('没有更多消息了', 'info');
+                        return;
+                    }
+                    
+                    renderMessages(messages, clearExisting);
+                    updatePageButtonsState(); // 更新分页按钮状态
+                    
+                    // 如果是新加载的页面，滚动到底部
+                    if (clearExisting) {
+                        scrollToBottom();
+                    }
+                })
+                .catch(err => {
+                    showLoading(false);
+                    elements.connectionStatus.classList.add('hidden');
+                    showNotification(`获取消息失败: ${err.message}`, 'error');
+                    console.error('Error fetching messages:', err);
+                });
+        }
+
+        function renderMessages(messages, prepend = false) {
+            const fragment = document.createDocumentFragment();
+            
+            messages.forEach(message => {
+                const messageElement = createMessageElement(message);
+                fragment.appendChild(messageElement);
+            });
+            
+            if (prepend) {
+                // 在现有消息前添加（加载历史消息）
+                const firstChild = elements.messagesContainer.firstChild;
+                if (firstChild) {
+                    elements.messagesContainer.insertBefore(fragment, firstChild);
+                } else {
+                    elements.messagesContainer.appendChild(fragment);
+                }
+            } else {
+                // 在现有消息后添加
+                elements.messagesContainer.appendChild(fragment);
+            }
+        }
+
+        function createMessageElement(message) {
+            const div = document.createElement('div');
+            div.className = 'message-appear bg-light-100 dark:bg-dark-200 p-4 rounded-lg shadow-sm max-w-3xl mx-auto transition-colors duration-300';
+            
+            const processedNewlines = message.body.replace(/\n+/g, '\n');
+            // 2. 再将处理后的文本解析为Markdown
+            let processedBody = marked.parse(processedNewlines);
+            const baseUrl = "https://images.weserv.nl?url=https://cnb.cool";
+
+            // 步骤2：再处理“图片标签”（此时文本链接已处理完，图片src替换后不会被二次修改）
+            processedBody = processedBody.replace(
+                /<img[^>]+src="([^"]+)"[^>]*>/g, 
+                `<img src="${baseUrl}$1" class="max-w-full h-auto rounded my-2" alt="图片">`
+            );
+            
+            // 格式化日期
+            const date = new Date(message.updated_at);
+            const formattedDate = date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+            
+            div.innerHTML = `
+                <div class="flex items-center justify-between mb-2">
+                    <span class="font-semibold text-gray-900 dark:text-white cursor-pointer hover:underline" 
+                          onclick="mentionUser('${message.author.username}')">
+                        ${message.author.nickname}@${message.author.username}
+                    </span>
+                    <span class="text-xs text-gray-500 dark:text-gray-400">${formattedDate}</span>
+                </div>
+                <div class="text-gray-700 dark:text-gray-300 whitespace-pre-line">${processedBody}</div>
+            `;
+            
+            return div;
+        }
+
+        // 添加mentionUser函数
+        function mentionUser(username) {
+            // 获取输入框
+            const messageInput = document.getElementById('message-input');
+            const cursorPosition = messageInput.selectionStart;
+            const currentText = messageInput.value;
+            const mentionText = `@${username} `;
+            const newText = currentText.substring(0, cursorPosition) + 
+                        mentionText + 
+                        currentText.substring(cursorPosition);
+            messageInput.value = newText;
+            const newCursorPosition = cursorPosition + mentionText.length;
+            messageInput.setSelectionRange(newCursorPosition, newCursorPosition);
+
+            // 聚焦到输入框
+            messageInput.focus();
+            updateCharCount();
+        }
+
+        function sendMessage() {
+            const messageText = elements.messageInput.value.trim();
+            
+            if (!messageText || !state.currentRoom || !state.authToken) return;
+            
+            const { repo, issueID } = state.currentRoom;
+            if (!repo || !issueID) {
+                showNotification('聊天室配置不完整', 'error');
+                return;
+            }
+            
+            showLoading(true);
+            
+            fetch('/api/messages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    repo,
+                    issueID,
+                    token: state.authToken,
+                    body: messageText
+                })
+            })
+            .then(res => {
+                if (!res.ok) {
+                    return res.json().then(data => {
+                        throw new Error(data.details || '发送消息失败');
+                    });
+                }
+                return res.json();
+            })
+            .then(newMessage => {
+                showLoading(false);
+                elements.messageInput.value = '';
+                updateCharCount();
+                
+                // 发送成功后返回第一页查看最新消息
+                state.currentPage = 1;
+                updatePaginationInputs();
+                savePaginationSettings(); // 保存到本地存储
+                fetchMessages(true);
+                showNotification('消息发送成功', 'success');
+            })
+            .catch(err => {
+                showLoading(false);
+                showNotification(`发送消息失败: ${err.message}`, 'error');
+                console.error('Error sending message:', err);
+            });
+        }
+
+        function refreshMessages() {
+            if (state.currentRoom) {
+                fetchMessages(true);
+            }
+        }
+
+        // 翻页控制函数
+        function goToPrevPage() {
+            if (state.currentPage > 1) {
+                state.currentPage--;
+                updatePaginationInputs();
+                savePaginationSettings(); // 保存到本地存储
+                fetchMessages(true);
+            }
+        }
+
+        function goToNextPage() {
+            state.currentPage++;
+            updatePaginationInputs();
+            savePaginationSettings(); // 保存到本地存储
+            fetchMessages(true);
+        }
+
+        // 跳转到指定页码
+        function goToSpecifiedPage() {
+            const page = parseInt(elements.pageInput.value);
+            
+            // 验证输入有效性
+            if (isNaN(page) || page < 1) {
+                showNotification('请输入有效的页码', 'error');
+                elements.pageInput.value = state.currentPage; // 恢复当前值
+                return;
+            }
+            
+            // 如果页码没有变化，则不执行操作
+            if (page === state.currentPage) return;
+            
+            state.currentPage = page;
+            updatePaginationInputs();
+            savePaginationSettings(); // 保存到本地存储
+            fetchMessages(true);
+        }
+
+        // 应用每页数量设置
+        function applyPageSize() {
+            const size = parseInt(elements.pageSizeInput.value);
+            
+            // 验证输入有效性，限制在1-200之间
+            if (isNaN(size) || size < 1 || size > 200) {
+                showNotification('请输入1-200之间的数量', 'error');
+                elements.pageSizeInput.value = state.pageSize; // 恢复当前值
+                return;
+            }
+            
+            // 如果数量没有变化，则不执行操作
+            if (size === state.pageSize) return;
+            
+            state.pageSize = size;
+            state.currentPage = 1; // 改变每页数量时重置为第一页
+            updatePaginationInputs();
+            savePaginationSettings(); // 保存到本地存储
+            fetchMessages(true);
+            showNotification(`已设置为每页${size}条`, 'success');
+        }
+
+        // 更新分页按钮状态
+        function updatePageButtonsState() {
+            elements.prevPageBtn.disabled = state.currentPage <= 1;
+            elements.nextPageBtn.disabled = false; // 下一页按钮始终可用
+        }
+
+        // 确认加载上一页
+        function confirmLoadPreviousPage() {
+            // 隐藏按钮并重置进度
+            resetScrollProgress();
+            
+            // 执行加载上一页操作
+            if (state.currentPage > 1) {
+                state.currentPage--;
+                updatePaginationInputs();
+                savePaginationSettings();
+                fetchMessages(true);
+            }
+        }
+
+        // 重置滚动进度
+        function resetScrollProgress() {
+            state.scrollProgress = 0;
+            elements.loadPrevProgress.style.width = '0%';
+            elements.loadPrevPageBtn.classList.add('hidden');
+            state.showLoadPrevBtn = false;
+            
+            // 清除超时
+            if (state.scrollTimeout) {
+                clearTimeout(state.scrollTimeout);
+                state.scrollTimeout = null;
+            }
+        }
+
+        // 滚动处理函数，显示加载上一页按钮和进度条
+        function handleScroll(e) {
+            const scrollTop = e.target.scrollTop;
+            const isScrollingUp = scrollTop < state.lastScrollTop; // Detecting scroll direction
+            state.lastScrollTop = scrollTop;
+
+            // Show the "Load Previous Page" button when close to the top
+            if (scrollTop <= 50 && !state.isLoading && state.currentPage > 1) {
+                if (!state.showLoadPrevBtn) {
+                    elements.loadPrevPageBtn.classList.remove('hidden');
+                    state.showLoadPrevBtn = true;
+                }
+
+                // Scroll Up: Increase progress
+                if (isScrollingUp) {
+                    const increment = scrollTop === 0 ? 10 : 5; // Speed up progress at the top
+                    state.scrollProgress += increment;
+                    if (state.scrollProgress > 100) state.scrollProgress = 100;
+
+                    // Update progress bar width
+                    elements.loadPrevProgress.style.width = `${state.scrollProgress}%`;
+
+                    // Timeout to auto-load previous page once progress reaches 100%
+                    if (state.scrollTimeout) {
+                        clearTimeout(state.scrollTimeout);
+                    }
+
+                    state.scrollTimeout = setTimeout(() => {
+                        if (state.scrollProgress >= state.requiredProgress) {
+                            confirmLoadPreviousPage();
+                        }
+                    }, 100);
+                } else if (scrollTop > 0) {
+                    // Scroll Down: Decrease progress
+                    state.scrollProgress -= 5;
+                    if (state.scrollProgress < 0) state.scrollProgress = 0;
+
+                    // Update progress bar width
+                    elements.loadPrevProgress.style.width = `${state.scrollProgress}%`;
+                }
+            } 
+            // Hide button and reset progress if scrolling down
+            else if (scrollTop > 50 && state.showLoadPrevBtn) {
+                resetScrollProgress();
+            }
+        }
+
+        function resetScrollProgress() {
+            state.scrollProgress = 0;
+            elements.loadPrevProgress.style.width = '0%';
+            elements.loadPrevPageBtn.classList.add('hidden');
+            state.showLoadPrevBtn = false;
+
+            // Clear any existing scroll timeout
+            if (state.scrollTimeout) {
+                clearTimeout(state.scrollTimeout);
+                state.scrollTimeout = null;
+            }
+        }
+
+        function confirmLoadPreviousPage() {
+            // Hide the button and reset progress
+            resetScrollProgress();
+
+            // Load previous page if possible
+            if (state.currentPage > 1) {
+                state.currentPage--;
+                updatePaginationInputs();
+                savePaginationSettings();
+                fetchMessages(true); // Fetch previous page's messages
+            }
+        }
+
+        function scrollToBottom() {
+            elements.messagesContainer.scrollTop = elements.messagesContainer.scrollHeight;
+        }
+
+        function updateCharCount() {
+            const count = elements.messageInput.value.length;
+            elements.charCount.textContent = count;
+            
+            // 限制最大字符数
+            if (count > 5000) {
+                elements.messageInput.value = elements.messageInput.value.substring(0, 5000);
+                elements.charCount.textContent = 5000;
+            }
+        }
+
+        // 认证管理
+        function saveAuthToken() {
+            const token = elements.authTokenInput.value.trim() || elements.authTokenMobileInput.value.trim();
+            if (token) {
+                state.authToken = token;
+                localStorage.setItem('cnbAuthToken', token);
+                showNotification('Token 保存成功', 'success');
+                
+                // 如果有当前选中的房间，刷新消息
+                if (state.currentRoom) {
+                    fetchMessages(true);
+                }
+            } else {
+                showNotification('请输入有效的Token', 'error');
+            }
+        }
+
+        // 主题切换
+        function toggleTheme() {
+            const isDark = document.documentElement.classList.toggle('dark');
+            localStorage.setItem('darkMode', isDark);
+        }
+
+        // 加载状态
+        function showLoading(show) {
+            state.isLoading = show;
+            elements.loadingIndicator.classList.toggle('hidden', !show);
+        }
+
+        // 通知
+        function showNotification(message, type = 'info') {
+            const notification = elements.notification;
+            notification.textContent = message;
+            
+            // 设置样式
+            notification.className = 'fixed bottom-4 right-4 p-4 rounded-lg shadow-lg transform transition-all duration-300 max-w-sm';
+            
+            switch(type) {
+                case 'success':
+                    notification.classList.add('bg-green-100', 'text-green-800', 'dark:bg-green-900', 'dark:text-green-200');
+                    break;
+                case 'error':
+                    notification.classList.add('bg-red-100', 'text-red-800', 'dark:bg-red-900', 'dark:text-red-200');
+                    break;
+                default:
+                    notification.classList.add('bg-blue-100', 'text-blue-800', 'dark:bg-blue-900', 'dark:text-blue-200');
+            }
+            
+            // 显示通知
+            notification.classList.remove('hidden', 'translate-y-20', 'opacity-0');
+            
+            // 3秒后隐藏
+            setTimeout(() => {
+                notification.classList.add('translate-y-20', 'opacity-0');
+                setTimeout(() => {
+                    notification.classList.add('hidden');
+                }, 300);
+            }, 3000);
+        }
+
+        // 启动应用
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
