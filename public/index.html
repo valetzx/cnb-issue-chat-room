@@ -690,7 +690,7 @@
         }
 
         // 消息管理
-        function fetchMessages(clearExisting = false) {
+        function fetchMessages(clearExisting = false, prepend = false) {
             if (!state.currentRoom || !state.authToken) return;
             
             const { repo, issueID } = state.currentRoom;
@@ -700,7 +700,9 @@
             }
             
             showLoading(true);
-            
+            const container = elements.messagesContainer;
+            const previousScrollHeight = prepend ? container.scrollHeight : 0;
+
             // 明确传递page和page_size参数
             fetch(`/api/messages?repo=${encodeURIComponent(repo)}&issueID=${issueID}&page=${state.currentPage}&page_size=${state.pageSize}&token=${encodeURIComponent(state.authToken)}`)
                 .then(res => {
@@ -714,32 +716,36 @@
                 .then(messages => {
                     showLoading(false);
                     elements.connectionStatus.classList.remove('hidden');
-                    
+
                     if (clearExisting) {
-                        elements.messagesContainer.innerHTML = '';
+                        container.innerHTML = '';
                     }
-                    
-                    if (messages.length === 0 && state.currentPage === 1) {
-                        elements.messagesContainer.innerHTML = `
+
+                    if (messages.length === 0 && state.currentPage === 1 && clearExisting) {
+                        container.innerHTML = `
                             <div class="text-center text-gray-500 dark:text-gray-400 py-8">
                                 该聊天室暂无消息
                             </div>
                         `;
                         return;
                     }
-                    
+
                     // 如果请求的页面没有消息且不是第一页，显示提示
                     if (messages.length === 0 && state.currentPage > 1) {
                         showNotification('没有更多消息了', 'info');
                         return;
                     }
-                    
-                    renderMessages(messages, clearExisting);
+
+                    renderMessages(messages, prepend);
                     updatePageButtonsState(); // 更新分页按钮状态
-                    
-                    // 如果是新加载的页面，滚动到底部
-                    if (clearExisting) {
+
+                    if (prepend) {
+                        const newScrollHeight = container.scrollHeight;
+                        container.scrollTop += newScrollHeight - previousScrollHeight;
+                        state.lastScrollTop = container.scrollTop;
+                    } else if (clearExisting) {
                         scrollToBottom();
+                        state.lastScrollTop = container.scrollTop;
                     }
                 })
                 .catch(err => {
@@ -953,34 +959,6 @@
             elements.nextPageBtn.disabled = false; // 下一页按钮始终可用
         }
 
-        // 确认加载上一页
-        function confirmLoadPreviousPage() {
-            // 隐藏按钮并重置进度
-            resetScrollProgress();
-            
-            // 执行加载上一页操作
-            if (state.currentPage > 1) {
-                state.currentPage--;
-                updatePaginationInputs();
-                savePaginationSettings();
-                fetchMessages(true);
-            }
-        }
-
-        // 重置滚动进度
-        function resetScrollProgress() {
-            state.scrollProgress = 0;
-            elements.loadPrevProgress.style.width = '0%';
-            elements.loadPrevPageBtn.classList.add('hidden');
-            state.showLoadPrevBtn = false;
-            
-            // 清除超时
-            if (state.scrollTimeout) {
-                clearTimeout(state.scrollTimeout);
-                state.scrollTimeout = null;
-            }
-        }
-
         // 滚动处理函数，显示加载上一页按钮和进度条
         function handleScroll(e) {
             const scrollTop = e.target.scrollTop;
@@ -1050,7 +1028,7 @@
                 state.currentPage--;
                 updatePaginationInputs();
                 savePaginationSettings();
-                fetchMessages(true); // Fetch previous page's messages
+                fetchMessages(false, true); // Fetch previous page's messages and prepend
             }
         }
 
