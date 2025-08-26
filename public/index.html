@@ -4,11 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CNB 聊天室</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="./tailwindcss.js"></script>
+    <script src="https://jsd.onmicrosoft.cn/npm/marked/marked.min.js"></script>
     <link href="https://jsd.onmicrosoft.cn/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
-    <!-- 引入marked库用于Markdown解析 -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    
+
     <!-- Tailwind 配置 -->
     <script>
         tailwind.config = {
@@ -105,7 +104,7 @@
             position: absolute;
             bottom: 0;
             left: 0;
-            height: 3px;
+            height: 40px;
             background-color: #FE5B35;
             width: 0%;
             transition: width 0.1s ease;
@@ -124,7 +123,7 @@
 <body class="bg-light-300 dark:bg-dark-300 text-gray-800 dark:text-gray-200 h-screen flex flex-col transition-colors duration-300">
     <!-- 顶部导航栏 -->
     <header class="bg-light-100 dark:bg-dark-200 shadow-md z-10 transition-colors duration-300 flex-shrink-0">
-        <div class="container mx-auto px-4 py-3 flex justify-between items-center">
+        <div class="mx-auto px-4 py-3 flex justify-between items-center">
             <!-- 默认标题和聊天室信息容器 -->
             <div id="header-content" class="flex items-center space-x-4">
                 <!-- 默认标题 -->
@@ -206,7 +205,7 @@
                 <div id="load-prev-progress"></div> <!-- 橙色进度条 -->
                 <div id="load-prev-content">
                     <i class="fa fa-chevron-up"></i>
-                    <span>加载上一页</span>
+                    <span>上一页</span>
                 </div>
             </button>
             
@@ -287,7 +286,7 @@
                 
                 <div>
                     <label for="room-url" class="block text-sm font-medium mb-1">Issue链接</label>
-                    <input type="text" id="room-url" placeholder="例如: https://cnb.cool/set/Playground/Desktop/-/issues/4" 
+                    <input type="text" id="room-url" placeholder="https://cnb.cool/wss/apps/cnb-room/-/issues/1" 
                         class="w-full bg-light-300 dark:bg-dark-100 p-2 rounded border border-light-400 dark:border-dark-100 focus:outline-none focus:ring-2 focus:ring-primary transition-colors duration-300">
                     <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">请输入完整的CNB issue链接</p>
                 </div>
@@ -488,6 +487,7 @@
             
             // 滚动加载更多
             elements.messagesContainer.addEventListener('scroll', handleScroll);
+            elements.messagesContainer.addEventListener('wheel', handleWheel, { passive: false });
         }
 
         // 房间管理
@@ -558,23 +558,19 @@
             if (confirm('确定要从本地存储中删除此聊天室吗？')) {
                 // 从状态中移除房间
                 state.rooms = state.rooms.filter(room => room.id !== roomId);
-
                 // 更新本地存储并重新渲染房间列表
                 saveRooms();
                 renderRoomsList();
-
                 // 如果删除的是当前选中的房间，隐藏聊天区域并恢复默认标题
                 if (state.currentRoom && state.currentRoom.id === roomId) {
                     state.currentRoom = null;
                     elements.chatContainer.classList.add('hidden');
                     elements.initialMessage.classList.remove('hidden');
-
                     // 恢复默认标题
                     elements.defaultHeader.classList.remove('hidden');
                     elements.roomHeader.classList.add('hidden');
                     elements.roomActions.classList.add('hidden');
                 }
-
                 showNotification('聊天室已从本地存储中删除', 'success');
             }
         }
@@ -704,7 +700,6 @@
             showLoading(true);
             const container = elements.messagesContainer;
             const previousScrollHeight = prepend ? container.scrollHeight : 0;
-
             // 明确传递page和page_size参数
             fetch(`/api/messages?repo=${encodeURIComponent(repo)}&issueID=${issueID}&page=${state.currentPage}&page_size=${state.pageSize}&token=${encodeURIComponent(state.authToken)}`)
                 .then(res => {
@@ -961,6 +956,34 @@
             elements.nextPageBtn.disabled = false; // 下一页按钮始终可用
         }
 
+        // 确认加载上一页
+        function confirmLoadPreviousPage() {
+            // 隐藏按钮并重置进度
+            resetScrollProgress();
+            
+            // 执行加载上一页操作
+            if (state.currentPage > 1) {
+                state.currentPage--;
+                updatePaginationInputs();
+                savePaginationSettings();
+                fetchMessages(true);
+            }
+        }
+
+        // 重置滚动进度
+        function resetScrollProgress() {
+            state.scrollProgress = 0;
+            elements.loadPrevProgress.style.width = '0%';
+            elements.loadPrevPageBtn.classList.add('hidden');
+            state.showLoadPrevBtn = false;
+            
+            // 清除超时
+            if (state.scrollTimeout) {
+                clearTimeout(state.scrollTimeout);
+                state.scrollTimeout = null;
+            }
+        }
+
         // 滚动处理函数，显示加载上一页按钮和进度条
         function handleScroll(e) {
             const scrollTop = e.target.scrollTop;
@@ -1008,6 +1031,38 @@
             }
         }
 
+        // 在顶部继续上滚时递增进度
+        function handleWheel(e) {
+            if (elements.messagesContainer.scrollTop === 0 && !state.isLoading && state.currentPage > 1) {
+                // 阻止页面整体滚动
+                e.preventDefault();
+
+                if (!state.showLoadPrevBtn) {
+                    elements.loadPrevPageBtn.classList.remove('hidden');
+                    state.showLoadPrevBtn = true;
+                }
+
+                if (e.deltaY < 0) {
+                    // 向上滚动，增加进度
+                    state.scrollProgress += 10;
+                    if (state.scrollProgress > 100) state.scrollProgress = 100;
+                    elements.loadPrevProgress.style.width = `${state.scrollProgress}%`;
+
+                    if (state.scrollTimeout) {
+                        clearTimeout(state.scrollTimeout);
+                    }
+                    state.scrollTimeout = setTimeout(() => {
+                        if (state.scrollProgress >= state.requiredProgress) {
+                            confirmLoadPreviousPage();
+                        }
+                    }, 100);
+                } else if (e.deltaY > 0 && state.showLoadPrevBtn) {
+                    // 向下滚动时重置进度
+                    resetScrollProgress();
+                }
+            }
+        }
+
         function resetScrollProgress() {
             state.scrollProgress = 0;
             elements.loadPrevProgress.style.width = '0%';
@@ -1030,7 +1085,7 @@
                 state.currentPage--;
                 updatePaginationInputs();
                 savePaginationSettings();
-                fetchMessages(false, true); // Fetch previous page's messages and prepend
+                fetchMessages(true); // Fetch previous page's messages
             }
         }
 
