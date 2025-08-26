@@ -488,6 +488,7 @@
             
             // 滚动加载更多
             elements.messagesContainer.addEventListener('scroll', handleScroll);
+            elements.messagesContainer.addEventListener('wheel', handleWheel, { passive: false });
         }
 
         // 房间管理
@@ -1025,6 +1026,38 @@
             // Hide button and reset progress if scrolling down
             else if (scrollTop > 50 && state.showLoadPrevBtn) {
                 resetScrollProgress();
+            }
+        }
+
+        // 在顶部继续上滚时递增进度
+        function handleWheel(e) {
+            if (elements.messagesContainer.scrollTop === 0 && !state.isLoading && state.currentPage > 1) {
+                // 阻止页面整体滚动
+                e.preventDefault();
+
+                if (!state.showLoadPrevBtn) {
+                    elements.loadPrevPageBtn.classList.remove('hidden');
+                    state.showLoadPrevBtn = true;
+                }
+
+                if (e.deltaY < 0) {
+                    // 向上滚动，增加进度
+                    state.scrollProgress += 10;
+                    if (state.scrollProgress > 100) state.scrollProgress = 100;
+                    elements.loadPrevProgress.style.width = `${state.scrollProgress}%`;
+
+                    if (state.scrollTimeout) {
+                        clearTimeout(state.scrollTimeout);
+                    }
+                    state.scrollTimeout = setTimeout(() => {
+                        if (state.scrollProgress >= state.requiredProgress) {
+                            confirmLoadPreviousPage();
+                        }
+                    }, 100);
+                } else if (e.deltaY > 0 && state.showLoadPrevBtn) {
+                    // 向下滚动时重置进度
+                    resetScrollProgress();
+                }
             }
         }
 
